@@ -11,7 +11,7 @@ class Pendulum():
         self.setup_constants()
         self.setup_state_variables()
 
-        self.base_motor = rpi_dc_lib.TranDc(pin=self.motor_enable_pin, freq=self.motor_pwm_freq, verbose=True)
+        self.base_motor = rpi_dc_lib.TranDc(pin = self.motor_enable_pin, freq = self.motor_pwm_freq, verbose = True)
 
         self.base_rotary = pigpio_encoder.Rotary(clk = self.clk_base_pin, dt = self.dt_base_pin, sw = self.sw_base_pin)
         self.base_rotary.setup_rotary(min = self.motor_rot_min, max = self.motor_rot_max, scale = self.motor_rot_scale, rotary_callback = self.base_callback)
@@ -61,6 +61,7 @@ class Pendulum():
         GPIO.setup(self.sw_pin_1, GPIO.IN)
         
     def setup_constants(self):
+        
         self.motor_step_delay = 0.05
         self.motor_pwm_freq = 200
         self.motor_rot_min = 0
