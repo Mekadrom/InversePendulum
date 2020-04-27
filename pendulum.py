@@ -1,141 +1,120 @@
-import time
-import RPi.GPIO as GPIO
-from pigpio_encoder import pigpio_encoder
-from RpiMotorLib import rpi_dc_lib
+from RPi import GPIO
+from time import sleep
+import numpy as np
 
-class Pendulum():
+
+class Pendulum:
     
     def __init__(self):
+        self.motor_enable = 22 # pwm output for motor driver
+        self.motor_ina = 23 # output 1 for clockwise, 0 for counter-clockwise
+        self.motor_inb = 24 # output 0 for clockwise, 1 for counter-clockwise
         
-        self.setup_pins()
-        self.setup_constants()
-        self.setup_state_variables()
-
-        self.base_motor = rpi_dc_lib.TranDc(pin = self.motor_enable_pin, freq = self.motor_pwm_freq, verbose = True)
-
-        self.base_rotary = pigpio_encoder.Rotary(clk = self.clk_base_pin, dt = self.dt_base_pin, sw = self.sw_base_pin)
-        self.base_rotary.setup_rotary(min = self.motor_rot_min, max = self.motor_rot_max, scale = self.motor_rot_scale, rotary_callback = self.base_callback)
-        self.base_rotary.setup_switch(sw_short_callback = self.sw_base_rot_short)
-
-        self.arm_rotary_1 = pigpio_encoder.Rotary(clk = self.clk_pin_1, dt = self.dt_pin_1, sw = self.sw_pin_1)
-        self.arm_rotary_1.setup_rotary(min = self.rot_min_1, max = self.rot_max_1, scale = self.rot_scale_1, rotary_callback = self.arm_callback_1)
-        self.arm_rotary_1.setup_switch(sw_short_callback = self.sw_arm_rot_short_1)
-
-        self.base_rotary.watch()
-        self.arm_rotary_1.watch()
+        self.phase_a = 17 # input of phase A for encoder
+        self.phase_b  = 27 # input of phase B for encoder
         
-        time.sleep(1)
-        
-        # rotate base to zero position
-        self.base_rotate(0.0)
-        
-        # start main loop for the inverse pendulum
-        self.control_loop()
-        
-    def setup_pins(self):
-        # define pins and set their input/output mode
-        self.motor_enable_pin = 8
-        self.motor_dir_pin = 10
-        
-        self.clk_base_pin = 23
-        self.dt_base_pin = 24
-        self.sw_base_pin = 16
-
-        self.clk_pin_1 = 27
-        self.dt_pin_1 = 22
-        self.sw_pin_1 = 12
-        
-        GPIO.cleanup()
-
+        # set mode to BCM so GPIO pin numbers are used instead of absolute
         GPIO.setmode(GPIO.BCM)
+        
+        GPIO.setup(self.motor_enable, GPIO.OUT) # output for motor pwm
+        GPIO.setup(self.motor_ina, GPIO.OUT) # output for motor ina
+        GPIO.setup(self.motor_inb, GPIO.OUT) # output for motor inb
+        
+        GPIO.setup(self.phase_a, GPIO.IN, pull_up_down=GPIO.PUD_UP) # input for encoder phase A
+        GPIO.setup(self.phase_b, GPIO.IN, pull_up_down=GPIO.PUD_UP) # input for encoder phase B
+        
+        self.motor_pwm = GPIO.PWM(self.motor_enable, 60) # 60 hertz frequency (i think)
+        self.motor_pwm.start(0) # start with 0% duty cycle (0-100 is the same as 0-255 in arduino)
+        
+        self.clockwise(0) # initially clockwise
 
-        GPIO.setup(self.motor_enable_pin, GPIO.OUT)
-        GPIO.setup(self.motor_dir_pin, GPIO.OUT)
+        self.counter = 0 # initially 0 counter, pendulum always starts down
+        self.a_state = GPIO.input(self.phase_a) # initially input clkState
+        self.a_last_state = GPIO.input(self.phase_a) # initially input clkLastState
         
-        GPIO.setup(self.clk_base_pin, GPIO.IN)
-        GPIO.setup(self.dt_base_pin, GPIO.IN)
-        GPIO.setup(self.sw_base_pin, GPIO.IN)
-
-        GPIO.setup(self.clk_pin_1, GPIO.IN)
-        GPIO.setup(self.dt_pin_1, GPIO.IN)
-        GPIO.setup(self.sw_pin_1, GPIO.IN)
+    def read_encoder(self):
+        self.a_state = GPIO.input(self.phase_a) # get current phase A state (0 or 1)
+        if self.a_state != self.a_last_state: # if phase A state has changed since last read
+            self.b_state = GPIO.input(self.phase_b) # get phase B state (also 0 or 1)
+            if self.b_state != self.a_state: # if they are different, encoder is moving clockwise
+                self.counter += 1 # increment counter for clockwise
+            else: # if they are the same, encoder is moving counter clockwise
+                self.counter -= 1 # decrement counter for counter clockwise
+            print(self.counter) # print for debugging
+        self.a_last_state = self.a_state # update last phase A state for next time around
+        # sleep(0.01) # sleep to let encoder input update
         
-    def setup_constants(self):
-        
-        self.motor_step_delay = 0.05
-        self.motor_pwm_freq = 200
-        self.motor_rot_min = 0
-        self.motor_rot_max = 360
-        self.motor_rot_scale = 0.1
-        
-        self.rot_min_1 = 0
-        self.rot_max_1 = 360
-        self.rot_scale_1 = 0.1
-        
-    def setup_state_variables(self):
-        
-        self.last_base_angle = 0.0
-        self.last_base_angle_time = 0
-        self.base_angle = 0.0
-        self.base_velocity = 0.0
-        
-        self.last_arm_angle_1 = 180.0
-        self.last_arm_angle__time_1 = 0
-        self.arm_angle_1 = 180.0
-        self.arm_angle_velocity_1 = 0.0
-        
-        self.target_arm_angle_1 = 0.0
-        
-    def sw_base_rot_short(self):
-        
-        # do nothing
-        pass
-        
-    def sw_arm_rot_short_1(self):
-        
-        #do nothing
-        pass
-        
-    def base_callback(self, counter):
-        
-        self.base_angle = counter
-        print("Base angle: ", counter)
-        
-    def arm_callback_1(self, counter):
-        
-        self.arm_angle_1 = counter
-        print("Arm 1 angle: ", counter)
-        
-    def control_loop(self):
-        
-        while True:
-            if not self.arm_angle_1 == self.target_arm_angle_1:
-                angle = self.arm_angle_1
-                print("Rotating: ", angle)
-                self.base_rotate(angle)
-                
-    def base_rotate(self, angle):
-        
-        while not angle == self.base_angle:
-            if self.base_angle < angle:
-                set_base_rot_dir(1)
-            else:
-                set_base_rot_dir(-1)
-                
-            speed = 100
-            self.base_motor.dc_motor_run(speed, self.step_delay)
-        
-    def set_base_rot_dir(self, dir):
-        # dir == -1 is ccw (looking down on pivot) and dir == 1 is cw (again, looking down)
-        if dir == 1:
-            GPIO.output(self.motor_enable_pin, GPIO.HIGH)
-        elif dir == -1:
-            GPIO.output(self.motor_enable_pin, GPIO.LOW)
+    def run_motor(self, speed):
+        if speed < 0:
+            self.counter_clockwise(speed) # move motor counter clockwise
+        elif speed > 0:
+            self.clockwise(speed) # move motor clockwise
         else:
-            print("incorrect way of braking; set speed to 0 instead")
+            self.motor_pwm.ChangeDutyCycle(0) # brake motor
             
+    def clockwise(self, speed):
+        GPIO.output(self.motor_ina, 1) # output 1 to ina for clockwise
+        GPIO.output(self.motor_inb, 0) # output 0 to inb for counter clocwise
+        speed = np.abs(speed) # get absolute value for outputting as duty cycle
+        # bind value to below 100% duty cycle (can't have >100% duty cycle)
+        if speed > 100: 
+            speed = 100
+        self.motor_pwm.ChangeDutyCycle(speed)
+        
+    def counter_clockwise(self, speed):
+        GPIO.output(self.motor_ina, 0) # output 0 to ina for counter clockwise
+        GPIO.output(self.motor_inb, 1) # output 1 to inb for clockwise
+        speed = np.abs(speed) # get absolute value for outputting as duty cycle
+        # bind value to below 100% duty cycle (can't have >100% duty cycle)
+        if speed > 100:
+            speed = 100
+        self.motor_pwm.ChangeDutyCycle(speed)
+        
+    def swing_up(self):
+        # do swing up routine to begin
+        # couldn't figure out how to do this with the encoder not working
+        # so, WIP
+                
+        while self.counter > 5 or self.counter < -5
+            sleep(0.01) # wait for pendulum to settle
+        # todo: implement swing up
+        
+        
+    def run(self):
+        self.swing_up()
+        
+        try:
+            # initialize some things before starting loop
+            error = 0
+            last_error = 0
+            sum_error = 0
             
+            # constants for PID control system
+            kP = 1.0 # proportional
+            kD = 1.0 # derivative
+            kI = 0.0 # i don't anticipate this being needed, but this is for integral
+            
+            setpoint = 180 # doesn't work because encoder currently drifts
+            
+            while True:
+                self.read_encoder() # update self.counter variable
+                
+                if counter < 90:
+#                     self.swing_up()
+                
+                # get difference between current position and where we want it to be (WIP)
+                error = self.counter - setpoint
+                
+                # shoud be between 0 and 100, because it directly corresponds to duty cycle of motor
+                adjustment = (kP * error) + (kD * (last_error - error)) + (kI * sum_error)
+                
+                last_error = error # update last_error
+                sum_error = sum_error + error # update sum_error
+                
+                self.run_motor(adjustment) # run motor at pwm required to adjust for current error
+        finally:
+            GPIO.cleanup()
 
-if __name__ == '__main__':
-    
-    pendulum = Pendulum()
+pendulum = Pendulum()
+
+pendulum.run()
