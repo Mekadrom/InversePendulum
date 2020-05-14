@@ -1,3 +1,4 @@
+# you are going to have to download at least one of these libraries (probably encoder)
 from RPi import GPIO
 from time import sleep
 import numpy as np
@@ -87,12 +88,6 @@ class Pendulum:
         sleep(0.1785)
         self.run_motor(20)
         sleep(0.1)
-#         self.run_motor(-100)
-#         sleep(0.1)
-#         self.run_motor(0)
-#         sleep(1.0)
-#         self.run_motor(-5)
-#         sleep(1.0)
         self.break_motor()
         
         # todo: implement swing up
@@ -131,7 +126,7 @@ class Pendulum:
                 last_error = error # update last_error
                 sum_error = sum_error + error # update sum_error
 #                 print(self.counter)
-#                 self.run_motor(10) # run motor at pwm required to adjust for current error
+#                 self.run_motor(adjustment) # run motor at pwm required to adjust for current error
                 print(self.counter)
 #                 self.run_motor(10)
 #                 self.clear_error()
